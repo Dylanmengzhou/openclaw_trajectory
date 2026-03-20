@@ -1,0 +1,16 @@
+{
+  "server": {
+    "port": 3001
+  },
+  "vite": {
+    "port": 5173
+  },
+  "gateway": {
+    "url": "ws://127.0.0.1:18789"
+  },
+  "chat": {
+    "url": "https://aigc.sankuai.com/v1/openai/native/chat/completions",
+    "token": "2031281011623567380",
+    "model": "aws.claude-opus-4.6"
+  }
+}

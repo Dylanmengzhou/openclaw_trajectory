@@ -21,11 +21,71 @@ export function ChatPanel({ checkedRows }: ChatPanelProps) {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  const sendMessage = async () => {
-    if (!input.trim() || loading) return
+  const EVAL_PROMPT = `请根据以下评估维度对上述 Agent 对话轨迹进行评判，给出每个维度的分数（0/1/2）和理由，以及最终综合结论。
 
-    const userText = input.trim()
-    setInput('')
+评估维度：
+
+**D1 工具调用准确性**：Agent 是否选对工具、参数是否正确、调用链是否合理。
+- 2分：工具选择正确、参数准确、调用链合理高效、有错误处理
+- 1分：工具基本对但有小问题：参数有瑕疵、有冗余调用
+- 0分：工具选错、关键参数错误导致失败、或该用工具时没用
+（若无工具调用，D1 默认 2 分）
+
+**D2 内容正确性**：事实、数据、逻辑是否正确，是否存在幻觉。
+- 2分：事实准确、数据无误、逻辑严密、无幻觉
+- 1分：核心内容正确，但有个别非致命错误或不够精确
+- 0分：存在关键事实错误、严重幻觉、或核心逻辑错误
+
+**D3 回复表达质量**：语言流畅度、逻辑条理、风格匹配度。
+- 2分：语言流畅自然、逻辑清晰、风格匹配场景、无冗余
+- 1分：基本可读，但有小瑕疵：略显生硬、有少量重复
+- 0分：表达混乱、严重语病、不可理解、或风格完全不匹配
+
+**D4 格式与结构**：是否遵循用户指定的格式要求、结构是否清晰。
+- 2分：完全符合用户指定格式，结构清晰可直接使用
+- 1分：格式基本对，有小偏差但不影响使用
+- 0分：格式严重不符或缺失
+
+**D5 执行效率与稳定性**：完成任务的效率、是否有不必要的重试和浪费。
+- 2分：执行高效、无冗余步骤、无超时、错误处理得当
+- 1分：最终完成但过程有冗余：多余重试、绕路、轻微延迟
+- 0分：严重低效或执行失败
+
+请严格按以下格式输出：
+
+## 评估结果
+
+### D1 工具调用准确性
+**得分：X/2**
+结论：...
+
+### D2 内容正确性
+**得分：X/2**
+结论：...
+
+### D3 回复表达质量
+**得分：X/2**
+结论：...
+
+### D4 格式与结构
+**得分：X/2**
+结论：...
+
+### D5 执行效率与稳定性
+**得分：X/2**
+结论：...
+
+---
+## 综合结论
+**总分：X/10**
+综合评价：...`
+
+  const sendMessage = async (overrideText?: string) => {
+    const text = overrideText ?? input.trim()
+    if (!text || loading) return
+
+    const userText = text
+    if (!overrideText) setInput('')
 
     // Append selected logs to user content if any
     let userContent = userText
@@ -115,6 +175,17 @@ export function ChatPanel({ checkedRows }: ChatPanelProps) {
             {checkedRows.length} log{checkedRows.length > 1 ? 's' : ''}
           </span>
         )}
+        {checkedRows.length > 0 && (
+          <button
+            onClick={() => sendMessage(EVAL_PROMPT)}
+            disabled={loading}
+            className="text-[10px] px-1.5 py-0.5 rounded border transition-colors disabled:opacity-40"
+            style={{ color: '#a78bfa', borderColor: '#7c3aed', background: 'rgba(124,58,237,0.1)' }}
+            title="按 rubric 评判所选日志"
+          >
+            Evaluate
+          </button>
+        )}
         <button
           onClick={() => setMessages([])}
           className="ml-auto text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors"
@@ -191,11 +262,11 @@ export function ChatPanel({ checkedRows }: ChatPanelProps) {
           placeholder={placeholder}
           value={input}
           onChange={e => setInput(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() } }}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(undefined) } }}
           disabled={loading}
         />
         <button
-          onClick={sendMessage}
+          onClick={() => sendMessage(undefined)}
           disabled={loading || !input.trim()}
           className="text-xs px-2.5 py-1.5 rounded border transition-colors disabled:opacity-40 flex-shrink-0"
           style={{ color: '#818cf8', borderColor: '#4f46e5', background: 'rgba(79,70,229,0.1)' }}

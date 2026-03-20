@@ -1,145 +1,154 @@
-import express from 'express'
-import cors from 'cors'
-import fs from 'fs'
-import path from 'path'
-import os from 'os'
-import crypto from 'crypto'
+import express from "express";
+import cors from "cors";
+import fs from "fs";
+import path from "path";
+import os from "os";
+import crypto from "crypto";
 function loadConfig() {
   try {
-    return JSON.parse(fs.readFileSync(new URL('./config.json', import.meta.url), 'utf-8'))
+    return JSON.parse(
+      fs.readFileSync(new URL("./config.json", import.meta.url), "utf-8"),
+    );
   } catch {
-    return {}
+    return {};
   }
 }
 
-const config = loadConfig()
+const config = loadConfig();
 
-const app = express()
-const PORT = config?.server?.port ?? 3001
+const app = express();
+const PORT = config?.server?.port ?? 3001;
 
-app.use(cors())
-app.use(express.json())
+app.use(cors());
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-const OPENCLAW_DIR = path.join(os.homedir(), '.openclaw')
-const AGENTS_DIR = path.join(OPENCLAW_DIR, 'agents')
+const OPENCLAW_DIR = path.join(os.homedir(), ".openclaw");
+const AGENTS_DIR = path.join(OPENCLAW_DIR, "agents");
 
 function expandPath(p) {
-  return p.replace(/^~/, os.homedir())
+  return p.replace(/^~/, os.homedir());
 }
 
 function safeReadDir(dirPath) {
   try {
-    return fs.readdirSync(dirPath)
+    return fs.readdirSync(dirPath);
   } catch (err) {
-    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return []
-    throw err
+    if (err.code === "ENOENT" || err.code === "ENOTDIR") return [];
+    throw err;
   }
 }
 
 function safeReadFile(filePath) {
   try {
-    return fs.readFileSync(filePath, 'utf-8')
+    return fs.readFileSync(filePath, "utf-8");
   } catch (err) {
-    if (err.code === 'ENOENT') return null
-    throw err
+    if (err.code === "ENOENT") return null;
+    throw err;
   }
 }
 
 function parseJsonlFile(filePath) {
-  const content = safeReadFile(filePath)
-  if (!content) return []
+  const content = safeReadFile(filePath);
+  if (!content) return [];
 
-  const lines = content.split('\n').filter(line => line.trim())
-  const events = []
+  const lines = content.split("\n").filter((line) => line.trim());
+  const events = [];
 
   for (const line of lines) {
     try {
-      events.push(JSON.parse(line))
+      events.push(JSON.parse(line));
     } catch {
       // skip malformed lines
     }
   }
 
-  return events
+  return events;
 }
 
 // GET /api/agents - list agent IDs
-app.get('/api/agents', (req, res) => {
+app.get("/api/agents", (req, res) => {
   try {
-    const agentsDir = expandPath(AGENTS_DIR)
-    const entries = safeReadDir(agentsDir)
+    const agentsDir = expandPath(AGENTS_DIR);
+    const entries = safeReadDir(agentsDir);
 
-    const agents = entries.filter(entry => {
+    const agents = entries.filter((entry) => {
       try {
-        const stat = fs.statSync(path.join(agentsDir, entry))
-        return stat.isDirectory()
+        const stat = fs.statSync(path.join(agentsDir, entry));
+        return stat.isDirectory();
       } catch {
-        return false
+        return false;
       }
-    })
+    });
 
-    res.json({ agents })
+    res.json({ agents });
   } catch (err) {
-    console.error('Error listing agents:', err)
-    res.status(500).json({ error: 'Failed to list agents' })
+    console.error("Error listing agents:", err);
+    res.status(500).json({ error: "Failed to list agents" });
   }
-})
+});
 
 function parseResetTimestamp(raw) {
   // Filename format: 2026-03-19T09-55-58.869Z  → 2026-03-19T09:55:58.869Z
-  return raw.replace(/T(\d{2})-(\d{2})-(\d{2})/, 'T$1:$2:$3')
+  return raw.replace(/T(\d{2})-(\d{2})-(\d{2})/, "T$1:$2:$3");
 }
 
 function collectResetSessions(sessionsDir, existingIds) {
-  const extra = []
+  const extra = [];
   for (const entry of safeReadDir(sessionsDir)) {
-    const marker = '.jsonl.reset.'
-    const idx = entry.indexOf(marker)
-    if (idx === -1) continue
-    const sessionId = entry.slice(0, idx)
-    if (existingIds.has(sessionId)) continue
-    const rawTs = entry.slice(idx + marker.length)
+    const marker = ".jsonl.reset.";
+    const idx = entry.indexOf(marker);
+    if (idx === -1) continue;
+    const sessionId = entry.slice(0, idx);
+    if (existingIds.has(sessionId)) continue;
+    const rawTs = entry.slice(idx + marker.length);
     extra.push({
       sessionId,
       sessionKey: sessionId,
       fileExists: true,
       isReset: true,
-      resetAt: parseResetTimestamp(rawTs)
-    })
-    existingIds.add(sessionId)
+      resetAt: parseResetTimestamp(rawTs),
+    });
+    existingIds.add(sessionId);
   }
-  return extra
+  return extra;
 }
 
 // GET /api/agents/:agentId/sessions - list sessions for an agent
-app.get('/api/agents/:agentId/sessions', (req, res) => {
+app.get("/api/agents/:agentId/sessions", (req, res) => {
   try {
-    const { agentId } = req.params
-    const sessionsDir = expandPath(path.join(AGENTS_DIR, agentId, 'sessions'))
-    const indexPath = path.join(sessionsDir, 'sessions.json')
+    const { agentId } = req.params;
+    const sessionsDir = expandPath(path.join(AGENTS_DIR, agentId, "sessions"));
+    const indexPath = path.join(sessionsDir, "sessions.json");
 
     // sessions.json is a MAP keyed by sessionKey, e.g. { "agent:abc:main": { sessionId, updatedAt, ... } }
-    const indexContent = safeReadFile(indexPath)
+    const indexContent = safeReadFile(indexPath);
     if (indexContent) {
       try {
-        const indexMap = JSON.parse(indexContent)
-        if (indexMap && typeof indexMap === 'object' && !Array.isArray(indexMap)) {
-          const sessions = Object.entries(indexMap).map(([sessionKey, meta]) => {
-            const sessionId = meta.sessionId || sessionKey
-            const filePath = path.join(sessionsDir, `${sessionId}.jsonl`)
-            return {
-              sessionId,
-              sessionKey,
-              fileExists: fs.existsSync(filePath),
-              ...meta
-            }
-          })
-          const existingIds = new Set(sessions.map(s => s.sessionId))
-          sessions.push(...collectResetSessions(sessionsDir, existingIds))
-          return res.json({ sessions })
+        const indexMap = JSON.parse(indexContent);
+        if (
+          indexMap &&
+          typeof indexMap === "object" &&
+          !Array.isArray(indexMap)
+        ) {
+          const sessions = Object.entries(indexMap).map(
+            ([sessionKey, meta]) => {
+              const sessionId = meta.sessionId || sessionKey;
+              const filePath = path.join(sessionsDir, `${sessionId}.jsonl`);
+              return {
+                sessionId,
+                sessionKey,
+                fileExists: fs.existsSync(filePath),
+                ...meta,
+              };
+            },
+          );
+          const existingIds = new Set(sessions.map((s) => s.sessionId));
+          sessions.push(...collectResetSessions(sessionsDir, existingIds));
+          return res.json({ sessions });
         }
         if (Array.isArray(indexMap)) {
-          return res.json({ sessions: indexMap })
+          return res.json({ sessions: indexMap });
         }
       } catch {
         // fall through to directory listing
@@ -147,77 +156,80 @@ app.get('/api/agents/:agentId/sessions', (req, res) => {
     }
 
     // Fall back to listing .jsonl files + reset files
-    const entries = safeReadDir(sessionsDir)
+    const entries = safeReadDir(sessionsDir);
     const sessions = entries
-      .filter(e => e.endsWith('.jsonl') && !e.includes('.reset.'))
-      .map(e => ({
-        sessionId: e.replace('.jsonl', ''),
-        sessionKey: e.replace('.jsonl', ''),
-        fileExists: true
-      }))
-    const existingIds = new Set(sessions.map(s => s.sessionId))
-    sessions.push(...collectResetSessions(sessionsDir, existingIds))
+      .filter((e) => e.endsWith(".jsonl") && !e.includes(".reset."))
+      .map((e) => ({
+        sessionId: e.replace(".jsonl", ""),
+        sessionKey: e.replace(".jsonl", ""),
+        fileExists: true,
+      }));
+    const existingIds = new Set(sessions.map((s) => s.sessionId));
+    sessions.push(...collectResetSessions(sessionsDir, existingIds));
 
-    res.json({ sessions })
+    res.json({ sessions });
   } catch (err) {
-    console.error('Error listing sessions:', err)
-    res.status(500).json({ error: 'Failed to list sessions' })
+    console.error("Error listing sessions:", err);
+    res.status(500).json({ error: "Failed to list sessions" });
   }
-})
+});
 
 // GET /api/sessions/:agentId/:sessionId - return parsed JSONL events
-app.get('/api/sessions/:agentId/:sessionId', (req, res) => {
+app.get("/api/sessions/:agentId/:sessionId", (req, res) => {
   try {
-    const { agentId, sessionId } = req.params
+    const { agentId, sessionId } = req.params;
     const filePath = expandPath(
-      path.join(AGENTS_DIR, agentId, 'sessions', `${sessionId}.jsonl`)
-    )
+      path.join(AGENTS_DIR, agentId, "sessions", `${sessionId}.jsonl`),
+    );
 
     if (!fs.existsSync(filePath)) {
       // Try reset files: {sessionId}.jsonl.reset.*
-      const sessionsDir = path.dirname(filePath)
+      const sessionsDir = path.dirname(filePath);
       const resetCandidates = safeReadDir(sessionsDir)
-        .filter(e => e.startsWith(`${sessionId}.jsonl.reset.`))
-        .sort() // ISO-ish timestamp → alphabetical = chronological
+        .filter((e) => e.startsWith(`${sessionId}.jsonl.reset.`))
+        .sort(); // ISO-ish timestamp → alphabetical = chronological
       if (resetCandidates.length > 0) {
-        const resetPath = path.join(sessionsDir, resetCandidates[resetCandidates.length - 1])
-        return res.json({ events: parseJsonlFile(resetPath), isReset: true })
+        const resetPath = path.join(
+          sessionsDir,
+          resetCandidates[resetCandidates.length - 1],
+        );
+        return res.json({ events: parseJsonlFile(resetPath), isReset: true });
       }
-      return res.status(404).json({ error: 'Session file not found' })
+      return res.status(404).json({ error: "Session file not found" });
     }
 
-    const events = parseJsonlFile(filePath)
-    res.json({ events })
+    const events = parseJsonlFile(filePath);
+    res.json({ events });
   } catch (err) {
-    console.error('Error reading session:', err)
-    res.status(500).json({ error: 'Failed to read session' })
+    console.error("Error reading session:", err);
+    res.status(500).json({ error: "Failed to read session" });
   }
-})
+});
 
 // GET /api/sessions/:agentId/:sessionId/stream - SSE endpoint
-app.get('/api/sessions/:agentId/:sessionId/stream', (req, res) => {
-  const { agentId, sessionId } = req.params
+app.get("/api/sessions/:agentId/:sessionId/stream", (req, res) => {
+  const { agentId, sessionId } = req.params;
   const filePath = expandPath(
-    path.join(AGENTS_DIR, agentId, 'sessions', `${sessionId}.jsonl`)
-  )
+    path.join(AGENTS_DIR, agentId, "sessions", `${sessionId}.jsonl`),
+  );
 
-  res.setHeader('Content-Type', 'text/event-stream')
-  res.setHeader('Cache-Control', 'no-cache')
-  res.setHeader('Connection', 'keep-alive')
-  res.flushHeaders()
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
 
   const sendEvent = (data) => {
-    res.write(`data: ${JSON.stringify(data)}\n\n`)
-  }
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
 
   // Read existing content first
-  const existingContent = safeReadFile(filePath)
+  const existingContent = safeReadFile(filePath);
   if (existingContent) {
-    const lines = existingContent.split('\n').filter(l => l.trim())
+    const lines = existingContent.split("\n").filter((l) => l.trim());
     for (const line of lines) {
       try {
-        const event = JSON.parse(line)
-        sendEvent(event)
+        const event = JSON.parse(line);
+        sendEvent(event);
       } catch {
         // skip malformed lines
       }
@@ -225,405 +237,481 @@ app.get('/api/sessions/:agentId/:sessionId/stream', (req, res) => {
   }
 
   // Watch for new lines using fs.watch
-  let lastSize = existingContent ? Buffer.byteLength(existingContent, 'utf-8') : 0
-  let watcher = null
+  let lastSize = existingContent
+    ? Buffer.byteLength(existingContent, "utf-8")
+    : 0;
+  let watcher = null;
 
   try {
     watcher = fs.watch(filePath, (eventType) => {
-      if (eventType !== 'change') return
+      if (eventType !== "change") return;
 
       try {
-        const stat = fs.statSync(filePath)
-        if (stat.size <= lastSize) return
+        const stat = fs.statSync(filePath);
+        if (stat.size <= lastSize) return;
 
-        const fd = fs.openSync(filePath, 'r')
-        const newBytes = stat.size - lastSize
-        const buffer = Buffer.alloc(newBytes)
-        fs.readSync(fd, buffer, 0, newBytes, lastSize)
-        fs.closeSync(fd)
+        const fd = fs.openSync(filePath, "r");
+        const newBytes = stat.size - lastSize;
+        const buffer = Buffer.alloc(newBytes);
+        fs.readSync(fd, buffer, 0, newBytes, lastSize);
+        fs.closeSync(fd);
 
-        lastSize = stat.size
+        lastSize = stat.size;
 
-        const newContent = buffer.toString('utf-8')
-        const newLines = newContent.split('\n').filter(l => l.trim())
+        const newContent = buffer.toString("utf-8");
+        const newLines = newContent.split("\n").filter((l) => l.trim());
 
         for (const line of newLines) {
           try {
-            const event = JSON.parse(line)
-            sendEvent(event)
+            const event = JSON.parse(line);
+            sendEvent(event);
           } catch {
             // skip malformed lines
           }
         }
       } catch (readErr) {
-        console.error('Error reading new content:', readErr)
+        console.error("Error reading new content:", readErr);
       }
-    })
+    });
   } catch (watchErr) {
-    if (watchErr.code !== 'ENOENT') {
-      console.error('Error watching file:', watchErr)
+    if (watchErr.code !== "ENOENT") {
+      console.error("Error watching file:", watchErr);
     }
   }
 
   const keepAlive = setInterval(() => {
-    res.write(': keepalive\n\n')
-  }, 15000)
+    res.write(": keepalive\n\n");
+  }, 15000);
 
-  req.on('close', () => {
-    clearInterval(keepAlive)
+  req.on("close", () => {
+    clearInterval(keepAlive);
     if (watcher) {
-      try { watcher.close() } catch {}
+      try {
+        watcher.close();
+      } catch {}
     }
-  })
-})
+  });
+});
 
 // ─── Live JSONL stream (tail the most-recently-modified session file) ─────────
 
 function findLatestSession() {
-  let latestFile = null, latestMtime = 0, agentId = null, sessionId = null
+  let latestFile = null,
+    latestMtime = 0,
+    agentId = null,
+    sessionId = null;
 
   for (const agent of safeReadDir(AGENTS_DIR)) {
-    const sessDir = path.join(AGENTS_DIR, agent, 'sessions')
+    const sessDir = path.join(AGENTS_DIR, agent, "sessions");
     for (const f of safeReadDir(sessDir)) {
-      if (!f.endsWith('.jsonl') || f.includes('.reset.')) continue
-      const filePath = path.join(AGENTS_DIR, agent, 'sessions', f)
+      if (!f.endsWith(".jsonl") || f.includes(".reset.")) continue;
+      const filePath = path.join(AGENTS_DIR, agent, "sessions", f);
       try {
-        const stat = fs.statSync(filePath)
+        const stat = fs.statSync(filePath);
         if (stat.mtimeMs > latestMtime) {
-          latestMtime = stat.mtimeMs
-          latestFile = filePath
-          agentId = agent
-          sessionId = f.replace('.jsonl', '')
+          latestMtime = stat.mtimeMs;
+          latestFile = filePath;
+          agentId = agent;
+          sessionId = f.replace(".jsonl", "");
         }
-      } catch { /* skip */ }
+      } catch {
+        /* skip */
+      }
     }
   }
-  return { file: latestFile, agentId, sessionId }
+  return { file: latestFile, agentId, sessionId };
 }
 
 // GET /api/live - return info about the latest session
-app.get('/api/live', (req, res) => {
-  const { file, agentId, sessionId } = findLatestSession()
-  if (!file) return res.status(404).json({ error: 'No sessions found' })
-  res.json({ agentId, sessionId })
-})
+app.get("/api/live", (req, res) => {
+  const { file, agentId, sessionId } = findLatestSession();
+  if (!file) return res.status(404).json({ error: "No sessions found" });
+  res.json({ agentId, sessionId });
+});
 
 // GET /api/live/stream - SSE that tails the latest session JSONL
-app.get('/api/live/stream', (req, res) => {
-  res.setHeader('Content-Type', 'text/event-stream')
-  res.setHeader('Cache-Control', 'no-cache')
-  res.setHeader('Connection', 'keep-alive')
-  res.flushHeaders()
+app.get("/api/live/stream", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
 
-  const { file, agentId, sessionId } = findLatestSession()
+  const { file, agentId, sessionId } = findLatestSession();
   if (!file) {
-    res.write(`data: ${JSON.stringify({ type: '__meta', error: 'no-sessions' })}\n\n`)
-    res.end()
-    return
+    res.write(
+      `data: ${JSON.stringify({ type: "__meta", error: "no-sessions" })}\n\n`,
+    );
+    res.end();
+    return;
   }
 
   // Send meta so client knows which session it's watching
-  res.write(`data: ${JSON.stringify({ type: '__meta', agentId, sessionId })}\n\n`)
+  res.write(
+    `data: ${JSON.stringify({ type: "__meta", agentId, sessionId })}\n\n`,
+  );
 
   // Stream all existing lines
-  const existingContent = safeReadFile(file)
-  let lastSize = 0
+  const existingContent = safeReadFile(file);
+  let lastSize = 0;
   if (existingContent) {
-    const lines = existingContent.split('\n').filter(l => l.trim())
+    const lines = existingContent.split("\n").filter((l) => l.trim());
     for (const line of lines) {
       try {
-        const parsed = JSON.parse(line)
-        res.write(`data: ${JSON.stringify(parsed)}\n\n`)
-      } catch { /* skip malformed */ }
+        const parsed = JSON.parse(line);
+        res.write(`data: ${JSON.stringify(parsed)}\n\n`);
+      } catch {
+        /* skip malformed */
+      }
     }
-    lastSize = Buffer.byteLength(existingContent, 'utf-8')
+    lastSize = Buffer.byteLength(existingContent, "utf-8");
   }
 
   // Watch for new lines
-  let watcher = null
+  let watcher = null;
   try {
     watcher = fs.watch(file, (eventType) => {
-      if (eventType !== 'change') return
+      if (eventType !== "change") return;
       try {
-        const stat = fs.statSync(file)
-        if (stat.size <= lastSize) return
-        const fd = fs.openSync(file, 'r')
-        const newBytes = stat.size - lastSize
-        const buffer = Buffer.alloc(newBytes)
-        fs.readSync(fd, buffer, 0, newBytes, lastSize)
-        fs.closeSync(fd)
-        lastSize = stat.size
-        const newLines = buffer.toString('utf-8').split('\n').filter(l => l.trim())
+        const stat = fs.statSync(file);
+        if (stat.size <= lastSize) return;
+        const fd = fs.openSync(file, "r");
+        const newBytes = stat.size - lastSize;
+        const buffer = Buffer.alloc(newBytes);
+        fs.readSync(fd, buffer, 0, newBytes, lastSize);
+        fs.closeSync(fd);
+        lastSize = stat.size;
+        const newLines = buffer
+          .toString("utf-8")
+          .split("\n")
+          .filter((l) => l.trim());
         for (const line of newLines) {
           try {
-            const parsed = JSON.parse(line)
-            res.write(`data: ${JSON.stringify(parsed)}\n\n`)
-          } catch { /* skip */ }
+            const parsed = JSON.parse(line);
+            res.write(`data: ${JSON.stringify(parsed)}\n\n`);
+          } catch {
+            /* skip */
+          }
         }
-      } catch { /* read error */ }
-    })
+      } catch {
+        /* read error */
+      }
+    });
   } catch (watchErr) {
-    if (watchErr.code !== 'ENOENT') console.error('[live] watch error:', watchErr)
+    if (watchErr.code !== "ENOENT")
+      console.error("[live] watch error:", watchErr);
   }
 
-  const ka = setInterval(() => { try { res.write(': ka\n\n') } catch {} }, 15000)
+  const ka = setInterval(() => {
+    try {
+      res.write(": ka\n\n");
+    } catch {}
+  }, 15000);
 
-  req.on('close', () => {
-    clearInterval(ka)
-    if (watcher) { try { watcher.close() } catch {} }
-  })
-})
+  req.on("close", () => {
+    clearInterval(ka);
+    if (watcher) {
+      try {
+        watcher.close();
+      } catch {}
+    }
+  });
+});
 
 // ─── OpenClaw Gateway WebSocket proxy ────────────────────────────────────────
 // Node.js 22+ has built-in WebSocket. We connect server-side so that
 // process.platform / process.arch pass OpenClaw's client schema validation.
 
-const GATEWAY_URL = config?.gateway?.url ?? 'ws://127.0.0.1:18789'
+const GATEWAY_URL = config?.gateway?.url ?? "ws://127.0.0.1:18789";
 
 // Read gateway auth token and port from ~/.openclaw/openclaw.json
 function readGatewayConfig() {
   try {
-    const cfg = JSON.parse(fs.readFileSync(path.join(OPENCLAW_DIR, 'openclaw.json'), 'utf-8'))
+    const cfg = JSON.parse(
+      fs.readFileSync(path.join(OPENCLAW_DIR, "openclaw.json"), "utf-8"),
+    );
     return {
-      token: cfg?.gateway?.auth?.token ?? '',
-      port: cfg?.gateway?.port ?? 18789
-    }
+      token: cfg?.gateway?.auth?.token ?? "",
+      port: cfg?.gateway?.port ?? 18789,
+    };
   } catch {
-    return { token: '', port: 18789 }
+    return { token: "", port: 18789 };
   }
 }
 
-let gatewayWs = null
-let gatewayStatus = 'disconnected'
-const sseClients = new Set()
+let gatewayWs = null;
+let gatewayStatus = "disconnected";
+const sseClients = new Set();
 
 function broadcastGateway(data) {
-  const msg = `data: ${JSON.stringify(data)}\n\n`
+  const msg = `data: ${JSON.stringify(data)}\n\n`;
   for (const res of sseClients) {
-    try { res.write(msg) } catch { sseClients.delete(res) }
+    try {
+      res.write(msg);
+    } catch {
+      sseClients.delete(res);
+    }
   }
 }
 
 function connectGateway() {
   if (gatewayWs) {
-    try { gatewayWs.close() } catch {}
-    gatewayWs = null
+    try {
+      gatewayWs.close();
+    } catch {}
+    gatewayWs = null;
   }
 
-  gatewayStatus = 'connecting'
-  broadcastGateway({ type: 'status', status: 'connecting' })
+  gatewayStatus = "connecting";
+  broadcastGateway({ type: "status", status: "connecting" });
 
-  let ws
+  let ws;
   try {
-    ws = new globalThis.WebSocket(GATEWAY_URL)
+    ws = new globalThis.WebSocket(GATEWAY_URL);
   } catch (err) {
-    console.error('[gateway] failed to create WebSocket:', err.message)
-    gatewayStatus = 'error'
-    broadcastGateway({ type: 'status', status: 'error', message: err.message })
-    setTimeout(connectGateway, 5000)
-    return
+    console.error("[gateway] failed to create WebSocket:", err.message);
+    gatewayStatus = "error";
+    broadcastGateway({ type: "status", status: "error", message: err.message });
+    setTimeout(connectGateway, 5000);
+    return;
   }
 
-  gatewayWs = ws
+  gatewayWs = ws;
 
-  ws.addEventListener('open', () => {
-    gatewayStatus = 'authenticating'
-    broadcastGateway({ type: 'status', status: 'authenticating' })
-    console.log('[gateway] connected, waiting for challenge…')
-  })
+  ws.addEventListener("open", () => {
+    gatewayStatus = "authenticating";
+    broadcastGateway({ type: "status", status: "authenticating" });
+    console.log("[gateway] connected, waiting for challenge…");
+  });
 
-  ws.addEventListener('message', (evt) => {
-    let frame
-    try { frame = JSON.parse(evt.data) } catch { return }
+  ws.addEventListener("message", (evt) => {
+    let frame;
+    try {
+      frame = JSON.parse(evt.data);
+    } catch {
+      return;
+    }
 
     // Respond to challenge
-    if (frame.type === 'event' && frame.event === 'connect.challenge') {
-      const { token } = readGatewayConfig()
+    if (frame.type === "event" && frame.event === "connect.challenge") {
+      const { token } = readGatewayConfig();
       const req = {
-        type: 'req',
+        type: "req",
         id: crypto.randomUUID(),
-        method: 'connect',
+        method: "connect",
         params: {
           minProtocol: 3,
           maxProtocol: 3,
           client: {
-            id: 'cli',
-            displayName: 'OpenClaw Trajectory Viewer',
-            version: '1.0.0',
+            id: "cli",
+            displayName: "OpenClaw Trajectory Viewer",
+            version: "1.0.0",
             platform: process.platform,
-            mode: 'cli'
+            mode: "cli",
           },
-          role: 'operator',
-          scopes: ['operator.read', 'operator.write'],
+          role: "operator",
+          scopes: ["operator.read", "operator.write"],
           auth: { token },
-          locale: 'en-US'
-        }
-      }
-      ws.send(JSON.stringify(req))
-      console.log('[gateway] challenge response sent')
-      return
+          locale: "en-US",
+        },
+      };
+      ws.send(JSON.stringify(req));
+      console.log("[gateway] challenge response sent");
+      return;
     }
 
     // hello-ok
-    if (frame.type === 'res' && frame.ok === true) {
-      gatewayStatus = 'connected'
-      broadcastGateway({ type: 'status', status: 'connected' })
-      console.log('[gateway] authenticated ✓')
-      return
+    if (frame.type === "res" && frame.ok === true) {
+      gatewayStatus = "connected";
+      broadcastGateway({ type: "status", status: "connected" });
+      console.log("[gateway] authenticated ✓");
+      return;
     }
 
     // Auth error
-    if (frame.type === 'res' && frame.ok === false) {
-      console.error('[gateway] auth error:', JSON.stringify(frame.error))
-      gatewayStatus = 'error'
-      broadcastGateway({ type: 'status', status: 'error', error: frame.error })
-      return
+    if (frame.type === "res" && frame.ok === false) {
+      console.error("[gateway] auth error:", JSON.stringify(frame.error));
+      gatewayStatus = "error";
+      broadcastGateway({ type: "status", status: "error", error: frame.error });
+      return;
     }
 
     // tick / presence → confirm connected
-    if (frame.type === 'event' && (frame.event === 'tick' || frame.event === 'presence')) {
-      if (gatewayStatus !== 'connected') {
-        gatewayStatus = 'connected'
-        broadcastGateway({ type: 'status', status: 'connected' })
+    if (
+      frame.type === "event" &&
+      (frame.event === "tick" || frame.event === "presence")
+    ) {
+      if (gatewayStatus !== "connected") {
+        gatewayStatus = "connected";
+        broadcastGateway({ type: "status", status: "connected" });
       }
-      return
+      return;
     }
 
     // Forward agent events to browser
-    if (frame.type === 'event' && frame.event === 'agent') {
+    if (frame.type === "event" && frame.event === "agent") {
       // Debug: log first occurrence of each stream type
-      const p = frame.payload
-      if (p) console.log(`[agent stream=${p.stream}]`, JSON.stringify(p.data ?? {}).slice(0, 120))
-      if (gatewayStatus !== 'connected') {
-        gatewayStatus = 'connected'
-        broadcastGateway({ type: 'status', status: 'connected' })
+      const p = frame.payload;
+      if (p)
+        console.log(
+          `[agent stream=${p.stream}]`,
+          JSON.stringify(p.data ?? {}).slice(0, 120),
+        );
+      if (gatewayStatus !== "connected") {
+        gatewayStatus = "connected";
+        broadcastGateway({ type: "status", status: "connected" });
       }
-      broadcastGateway({ type: 'agent-event', payload: frame.payload })
+      broadcastGateway({ type: "agent-event", payload: frame.payload });
     }
-  })
+  });
 
-  ws.addEventListener('error', (evt) => {
-    console.error('[gateway] WebSocket error:', evt.message ?? 'unknown')
-    gatewayStatus = 'error'
-    broadcastGateway({ type: 'status', status: 'error' })
-  })
+  ws.addEventListener("error", (evt) => {
+    console.error("[gateway] WebSocket error:", evt.message ?? "unknown");
+    gatewayStatus = "error";
+    broadcastGateway({ type: "status", status: "error" });
+  });
 
-  ws.addEventListener('close', () => {
-    gatewayWs = null
-    console.log('[gateway] disconnected, reconnecting in 3s…')
-    gatewayStatus = 'connecting'
-    broadcastGateway({ type: 'status', status: 'connecting' })
-    setTimeout(connectGateway, 3000)
-  })
+  ws.addEventListener("close", () => {
+    gatewayWs = null;
+    console.log("[gateway] disconnected, reconnecting in 3s…");
+    gatewayStatus = "connecting";
+    broadcastGateway({ type: "status", status: "connecting" });
+    setTimeout(connectGateway, 3000);
+  });
 }
 
 // SSE endpoint — browser subscribes here instead of connecting to WS directly
-app.get('/api/gateway/stream', (req, res) => {
-  res.setHeader('Content-Type', 'text/event-stream')
-  res.setHeader('Cache-Control', 'no-cache')
-  res.setHeader('Connection', 'keep-alive')
-  res.flushHeaders()
+app.get("/api/gateway/stream", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
 
   // Send current status immediately so UI reflects real state on connect
-  res.write(`data: ${JSON.stringify({ type: 'status', status: gatewayStatus })}\n\n`)
+  res.write(
+    `data: ${JSON.stringify({ type: "status", status: gatewayStatus })}\n\n`,
+  );
 
-  sseClients.add(res)
+  sseClients.add(res);
 
-  const ka = setInterval(() => { try { res.write(': ka\n\n') } catch {} }, 20000)
+  const ka = setInterval(() => {
+    try {
+      res.write(": ka\n\n");
+    } catch {}
+  }, 20000);
 
-  req.on('close', () => {
-    clearInterval(ka)
-    sseClients.delete(res)
-  })
-})
+  req.on("close", () => {
+    clearInterval(ka);
+    sseClients.delete(res);
+  });
+});
 
 // ─── Chat endpoint (proxy to configured LLM API) ─────────────────────────────
-app.post('/api/chat', async (req, res) => {
-  const chatCfg = config?.chat ?? {}
-  const chatUrl = chatCfg.url || 'https://aigc.sankuai.com/v1/openai/native/chat/completions'
-  const chatToken = chatCfg.token || process.env.CHAT_API_TOKEN || ''
-  const chatModel = chatCfg.model || 'aws.claude-opus-4.6'
+app.post("/api/chat", async (req, res) => {
+  const chatCfg = config?.chat ?? {};
+  const chatUrl =
+    chatCfg.url || "https://aigc.sankuai.com/v1/openai/native/chat/completions";
+  const chatToken = chatCfg.token || process.env.CHAT_API_TOKEN || "";
+  const chatModel = chatCfg.model || "aws.claude-opus-4.6";
 
   if (!chatToken) {
-    return res.status(500).json({ error: 'chat.token not set in config.json and CHAT_API_TOKEN env not set' })
+    return res
+      .status(500)
+      .json({
+        error:
+          "chat.token not set in config.json and CHAT_API_TOKEN env not set",
+      });
   }
 
-  const { messages, systemPrompt } = req.body
+  const { messages, systemPrompt } = req.body;
   if (!Array.isArray(messages)) {
-    return res.status(400).json({ error: 'messages must be an array' })
+    return res.status(400).json({ error: "messages must be an array" });
   }
 
-  res.setHeader('Content-Type', 'text/event-stream')
-  res.setHeader('Cache-Control', 'no-cache')
-  res.setHeader('Connection', 'keep-alive')
-  res.flushHeaders()
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
 
   // Build messages array: prepend system as a system-role message if provided
   const fullMessages = systemPrompt
-    ? [{ role: 'system', content: systemPrompt }, ...messages]
-    : messages
+    ? [{ role: "system", content: systemPrompt }, ...messages]
+    : messages;
 
   try {
     const response = await fetch(chatUrl, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Authorization': chatToken,
-        'Content-Type': 'application/json'
+        Authorization: chatToken,
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         model: chatModel,
-        max_tokens: 2048,
+        max_tokens: 16000,
         stream: true,
-        messages: fullMessages
-      })
-    })
+        thinking: {
+          type: "enabled",
+          budget_tokens: 10000,
+        },
+        messages: fullMessages,
+      }),
+    });
 
     if (!response.ok) {
-      const err = await response.text()
-      res.write(`data: ${JSON.stringify({ type: 'error', message: err })}\n\n`)
-      res.end()
-      return
+      const err = await response.text();
+      res.write(`data: ${JSON.stringify({ type: "error", message: err })}\n\n`);
+      res.end();
+      return;
     }
 
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder()
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
 
     while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
+      const { done, value } = await reader.read();
+      if (done) break;
 
-      const chunk = decoder.decode(value, { stream: true })
-      for (const line of chunk.split('\n')) {
-        if (!line.startsWith('data: ')) continue
-        const data = line.slice(6).trim()
-        if (data === '[DONE]') {
-          res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`)
-          continue
+      const chunk = decoder.decode(value, { stream: true });
+      for (const line of chunk.split("\n")) {
+        if (!line.startsWith("data: ")) continue;
+        const data = line.slice(6).trim();
+        if (data === "[DONE]") {
+          res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+          continue;
         }
         try {
-          const event = JSON.parse(data)
+          const event = JSON.parse(data);
           // OpenAI-compatible streaming format
-          const delta = event.choices?.[0]?.delta
+          const delta = event.choices?.[0]?.delta;
           if (delta?.content) {
-            res.write(`data: ${JSON.stringify({ type: 'text', text: delta.content })}\n\n`)
+            res.write(
+              `data: ${JSON.stringify({ type: "text", text: delta.content })}\n\n`,
+            );
           }
           // Also handle thinking blocks if present
           if (delta?.thinking) {
-            res.write(`data: ${JSON.stringify({ type: 'text', text: delta.thinking })}\n\n`)
+            res.write(
+              `data: ${JSON.stringify({ type: "text", text: delta.thinking })}\n\n`,
+            );
           }
-        } catch { /* skip malformed */ }
+        } catch {
+          /* skip malformed */
+        }
       }
     }
-    res.end()
+    res.end();
   } catch (err) {
-    res.write(`data: ${JSON.stringify({ type: 'error', message: err.message })}\n\n`)
-    res.end()
+    res.write(
+      `data: ${JSON.stringify({ type: "error", message: err.message })}\n\n`,
+    );
+    res.end();
   }
-})
+});
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
-  console.log(`OpenClaw Trajectory API server running on http://localhost:${PORT}`)
-  console.log(`Reading data from: ${AGENTS_DIR}`)
-  connectGateway()
-})
+  console.log(
+    `OpenClaw Trajectory API server running on http://localhost:${PORT}`,
+  );
+  console.log(`Reading data from: ${AGENTS_DIR}`);
+  connectGateway();
+});
