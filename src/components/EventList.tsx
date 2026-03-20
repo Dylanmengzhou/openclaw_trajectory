@@ -1,5 +1,6 @@
 /**
- * Shared event list + detail panel used by both SessionViewer and LiveMonitor.
+ * Shared event list used by both SessionViewer and LiveMonitor.
+ * Right panel and detail panel are managed by the parent.
  */
 import { useState } from 'react'
 import { formatTimestamp, toolToType, EVENT_TYPE_META } from '../lib/utils'
@@ -185,7 +186,7 @@ function RowLine({
   )
 }
 
-function DetailPanel({ row }: { row: EventRow | null }) {
+export function DetailPanel({ row }: { row: EventRow | null }) {
   if (!row) {
     return (
       <div className="flex items-center justify-center h-full text-zinc-700 text-xs select-none px-4 text-center">
@@ -228,14 +229,21 @@ function DetailPanel({ row }: { row: EventRow | null }) {
 
 interface EventListProps {
   rows: EventRow[]
-  header?: React.ReactNode        // slot above filter chips
-  footer?: React.ReactNode        // slot for empty-state override
+  header?: React.ReactNode
+  footer?: React.ReactNode
   bottomRef?: React.RefObject<HTMLDivElement>
   checkedIds?: Set<string>
   onCheckedChange?: (ids: Set<string>) => void
+  onRowSelect?: (row: EventRow | null) => void
+  /** Optional panel rendered to the right of the list (e.g. ChatPanel) */
+  rightPanel?: React.ReactNode
 }
 
-export function EventList({ rows, header, footer, bottomRef, checkedIds, onCheckedChange }: EventListProps) {
+export function EventList({
+  rows, header, footer, bottomRef,
+  checkedIds, onCheckedChange,
+  onRowSelect, rightPanel
+}: EventListProps) {
   const [activeType, setActiveType] = useState<EventType | 'ALL'>('ALL')
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null)
 
@@ -244,21 +252,18 @@ export function EventList({ rows, header, footer, bottomRef, checkedIds, onCheck
   const totalEvents = rows.length
   const activeTypes = (Object.keys(typeCounts) as EventType[]).filter(t => (typeCounts[t] ?? 0) > 0)
   const visibleRows = activeType === 'ALL' ? rows : rows.filter(r => r.type === activeType)
-  const selectedRow = rows.find(r => r.id === selectedRowId) ?? null
+
+  const handleRowClick = (row: EventRow) => {
+    const next = selectedRowId === row.id ? null : row.id
+    setSelectedRowId(next)
+    onRowSelect?.(next ? row : null)
+  }
 
   const handleCheck = (id: string, v: boolean) => {
     if (!onCheckedChange) return
     const next = new Set(checkedIds ?? [])
     if (v) next.add(id); else next.delete(id)
     onCheckedChange(next)
-  }
-
-  const handleSelectAll = () => {
-    onCheckedChange?.(new Set(visibleRows.map(r => r.id)))
-  }
-
-  const handleClearChecked = () => {
-    onCheckedChange?.(new Set())
   }
 
   const checkedCount = checkedIds?.size ?? 0
@@ -285,14 +290,14 @@ export function EventList({ rows, header, footer, bottomRef, checkedIds, onCheck
                   <span className="text-[10px] text-indigo-400">{checkedCount} selected</span>
                 )}
                 <button
-                  onClick={handleSelectAll}
+                  onClick={() => onCheckedChange(new Set(visibleRows.map(r => r.id)))}
                   className="text-[10px] text-zinc-600 hover:text-zinc-400 border border-[#27272a] rounded px-1.5 py-0.5 transition-colors"
                 >
                   All
                 </button>
                 {checkedCount > 0 && (
                   <button
-                    onClick={handleClearChecked}
+                    onClick={() => onCheckedChange(new Set())}
                     className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors"
                   >
                     Clear
@@ -316,7 +321,7 @@ export function EventList({ rows, header, footer, bottomRef, checkedIds, onCheck
                 selected={selectedRowId === row.id}
                 checked={checkedIds?.has(row.id) ?? false}
                 onCheck={handleCheck}
-                onClick={() => setSelectedRowId(selectedRowId === row.id ? null : row.id)}
+                onClick={() => handleRowClick(row)}
               />
             ))}
             {bottomRef && <div ref={bottomRef} />}
@@ -324,10 +329,12 @@ export function EventList({ rows, header, footer, bottomRef, checkedIds, onCheck
         )}
       </div>
 
-      {/* Detail panel */}
-      <div className="w-72 flex-shrink-0 bg-[#0e0e0e]">
-        <DetailPanel row={selectedRow} />
-      </div>
+      {/* Right panel (e.g. ChatPanel) */}
+      {rightPanel && (
+        <div className="w-80 flex-shrink-0 bg-[#0e0e0e]">
+          {rightPanel}
+        </div>
+      )}
     </div>
   )
 }

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { formatDuration, formatCost } from '../lib/utils'
-import { EventList, buildRows } from './EventList'
+import { EventList, DetailPanel, buildRows } from './EventList'
 import { ChatPanel } from './ChatPanel'
 import type { EventRow } from './EventList'
 import type { OpenClawLine } from '../types'
@@ -35,6 +35,7 @@ export function SessionViewer({ events, agentId, sessionId }: SessionViewerProps
   const stats = useStats(events)
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set())
   const [chatOpen, setChatOpen] = useState(false)
+  const [selectedRow, setSelectedRow] = useState<EventRow | null>(null)
 
   const checkedRows: EventRow[] = rows.filter(r => checkedIds.has(r.id))
 
@@ -70,19 +71,22 @@ export function SessionViewer({ events, agentId, sessionId }: SessionViewerProps
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
+      {/* Top: event list + optional chat panel side by side */}
       <div className="flex-1 min-h-0 overflow-hidden">
         <EventList
           rows={rows}
           header={header}
           checkedIds={checkedIds}
           onCheckedChange={setCheckedIds}
+          onRowSelect={setSelectedRow}
+          rightPanel={chatOpen ? <ChatPanel checkedRows={checkedRows} /> : undefined}
         />
       </div>
-      {chatOpen && (
-        <div className="h-72 flex-shrink-0 overflow-hidden">
-          <ChatPanel checkedRows={checkedRows} />
-        </div>
-      )}
+
+      {/* Bottom: detail panel, always visible */}
+      <div className="h-52 flex-shrink-0 border-t border-[#242424] bg-[#0e0e0e] overflow-hidden">
+        <DetailPanel row={selectedRow} />
+      </div>
     </div>
   )
 }

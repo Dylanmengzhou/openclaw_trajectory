@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { formatDuration, formatCost } from '../lib/utils'
-import { EventList, buildRows } from './EventList'
+import { EventList, DetailPanel, buildRows } from './EventList'
 import { ChatPanel } from './ChatPanel'
 import type { EventRow } from './EventList'
 import type { OpenClawLine } from '../types'
@@ -16,11 +16,14 @@ function useLiveStream() {
   const [sessionInfo, setSessionInfo] = useState<{ agentId: string; sessionId: string } | null>(null)
   const [status, setStatus] = useState<'idle' | 'connecting' | 'streaming' | 'error'>('idle')
   const esRef = useRef<EventSource | null>(null)
+  const enabledRef = useRef(false)
+  const sessionInfoRef = useRef<{ agentId: string; sessionId: string } | null>(null)
 
   const connect = useCallback(() => {
     if (esRef.current) { esRef.current.close(); esRef.current = null }
     setEvents([])
     setSessionInfo(null)
+    sessionInfoRef.current = null
     setStatus('connecting')
 
     const es = new EventSource('/api/live/stream')
@@ -34,7 +37,9 @@ function useLiveStream() {
         const meta = line as unknown as { agentId?: string; sessionId?: string; error?: string }
         if (meta.error) { setStatus('error'); return }
         if (meta.agentId && meta.sessionId) {
-          setSessionInfo({ agentId: meta.agentId, sessionId: meta.sessionId })
+          const info = { agentId: meta.agentId, sessionId: meta.sessionId }
+          setSessionInfo(info)
+          sessionInfoRef.current = info
           setStatus('streaming')
         }
         return
@@ -47,15 +52,40 @@ function useLiveStream() {
   }, [])
 
   const disconnect = useCallback(() => {
+    enabledRef.current = false
     if (esRef.current) { esRef.current.close(); esRef.current = null }
     setStatus('idle')
     setEvents([])
     setSessionInfo(null)
+    sessionInfoRef.current = null
   }, [])
+
+  // Poll /api/live every 5s to auto-detect a new session (e.g. after /new)
+  useEffect(() => {
+    const poll = setInterval(async () => {
+      if (!enabledRef.current) return
+      try {
+        const res = await fetch('/api/live')
+        if (!res.ok) return
+        const data = await res.json() as { agentId: string; sessionId: string }
+        const current = sessionInfoRef.current
+        if (current && data.sessionId !== current.sessionId) {
+          // New session detected — reconnect
+          connect()
+        }
+      } catch { /* ignore */ }
+    }, 5000)
+    return () => clearInterval(poll)
+  }, [connect])
+
+  const start = useCallback(() => {
+    enabledRef.current = true
+    connect()
+  }, [connect])
 
   useEffect(() => () => { esRef.current?.close() }, [])
 
-  return { events, sessionInfo, status, connect, disconnect }
+  return { events, sessionInfo, status, start, disconnect }
 }
 
 // ─── Stats ────────────────────────────────────────────────────────────────────
@@ -80,10 +110,11 @@ function useStats(events: OpenClawLine[]) {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export function LiveMonitor({ onClear }: LiveMonitorProps) {
-  const { events, sessionInfo, status, connect, disconnect } = useLiveStream()
+  const { events, sessionInfo, status, start, disconnect } = useLiveStream()
   const [enabled, setEnabled] = useState(false)
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set())
   const [chatOpen, setChatOpen] = useState(false)
+  const [selectedRow, setSelectedRow] = useState<EventRow | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null) as React.RefObject<HTMLDivElement>
 
   const rows = buildRows(events)
@@ -96,7 +127,7 @@ export function LiveMonitor({ onClear }: LiveMonitorProps) {
 
   const handleToggle = () => {
     if (enabled) { disconnect(); setEnabled(false) }
-    else { connect(); setEnabled(true) }
+    else { start(); setEnabled(true) }
   }
 
   const handleClear = () => {
@@ -190,6 +221,7 @@ export function LiveMonitor({ onClear }: LiveMonitorProps) {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
+      {/* Top: event list + optional chat panel side by side */}
       <div className="flex-1 min-h-0 overflow-hidden">
         <EventList
           rows={rows}
@@ -198,13 +230,15 @@ export function LiveMonitor({ onClear }: LiveMonitorProps) {
           bottomRef={bottomRef}
           checkedIds={checkedIds}
           onCheckedChange={setCheckedIds}
+          onRowSelect={setSelectedRow}
+          rightPanel={chatOpen ? <ChatPanel checkedRows={checkedRows} /> : undefined}
         />
       </div>
-      {chatOpen && (
-        <div className="h-72 flex-shrink-0 overflow-hidden">
-          <ChatPanel checkedRows={checkedRows} />
-        </div>
-      )}
+
+      {/* Bottom: detail panel, always visible */}
+      <div className="h-52 flex-shrink-0 border-t border-[#242424] bg-[#0e0e0e] overflow-hidden">
+        <DetailPanel row={selectedRow} />
+      </div>
     </div>
   )
 }
