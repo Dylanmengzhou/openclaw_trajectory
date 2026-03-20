@@ -117,6 +117,9 @@ export interface AgentInfo {
 
 export interface SessionInfo {
   sessionId: string
+  fileExists?: boolean
+  isReset?: boolean
+  resetAt?: string
   updatedAt?: string
   inputTokens?: number
   outputTokens?: number

@@ -4,9 +4,18 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import crypto from 'crypto'
+function loadConfig() {
+  try {
+    return JSON.parse(fs.readFileSync(new URL('./config.json', import.meta.url), 'utf-8'))
+  } catch {
+    return {}
+  }
+}
+
+const config = loadConfig()
 
 const app = express()
-const PORT = 3001
+const PORT = config?.server?.port ?? 3001
 
 app.use(cors())
 app.use(express.json())
@@ -22,7 +31,7 @@ function safeReadDir(dirPath) {
   try {
     return fs.readdirSync(dirPath)
   } catch (err) {
-    if (err.code === 'ENOENT') return []
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return []
     throw err
   }
 }
@@ -76,6 +85,32 @@ app.get('/api/agents', (req, res) => {
   }
 })
 
+function parseResetTimestamp(raw) {
+  // Filename format: 2026-03-19T09-55-58.869Z  → 2026-03-19T09:55:58.869Z
+  return raw.replace(/T(\d{2})-(\d{2})-(\d{2})/, 'T$1:$2:$3')
+}
+
+function collectResetSessions(sessionsDir, existingIds) {
+  const extra = []
+  for (const entry of safeReadDir(sessionsDir)) {
+    const marker = '.jsonl.reset.'
+    const idx = entry.indexOf(marker)
+    if (idx === -1) continue
+    const sessionId = entry.slice(0, idx)
+    if (existingIds.has(sessionId)) continue
+    const rawTs = entry.slice(idx + marker.length)
+    extra.push({
+      sessionId,
+      sessionKey: sessionId,
+      fileExists: true,
+      isReset: true,
+      resetAt: parseResetTimestamp(rawTs)
+    })
+    existingIds.add(sessionId)
+  }
+  return extra
+}
+
 // GET /api/agents/:agentId/sessions - list sessions for an agent
 app.get('/api/agents/:agentId/sessions', (req, res) => {
   try {
@@ -89,11 +124,18 @@ app.get('/api/agents/:agentId/sessions', (req, res) => {
       try {
         const indexMap = JSON.parse(indexContent)
         if (indexMap && typeof indexMap === 'object' && !Array.isArray(indexMap)) {
-          const sessions = Object.entries(indexMap).map(([sessionKey, meta]) => ({
-            sessionId: meta.sessionId || sessionKey,
-            sessionKey,
-            ...meta
-          }))
+          const sessions = Object.entries(indexMap).map(([sessionKey, meta]) => {
+            const sessionId = meta.sessionId || sessionKey
+            const filePath = path.join(sessionsDir, `${sessionId}.jsonl`)
+            return {
+              sessionId,
+              sessionKey,
+              fileExists: fs.existsSync(filePath),
+              ...meta
+            }
+          })
+          const existingIds = new Set(sessions.map(s => s.sessionId))
+          sessions.push(...collectResetSessions(sessionsDir, existingIds))
           return res.json({ sessions })
         }
         if (Array.isArray(indexMap)) {
@@ -104,14 +146,17 @@ app.get('/api/agents/:agentId/sessions', (req, res) => {
       }
     }
 
-    // Fall back to listing .jsonl files
+    // Fall back to listing .jsonl files + reset files
     const entries = safeReadDir(sessionsDir)
     const sessions = entries
       .filter(e => e.endsWith('.jsonl') && !e.includes('.reset.'))
       .map(e => ({
         sessionId: e.replace('.jsonl', ''),
-        sessionKey: e.replace('.jsonl', '')
+        sessionKey: e.replace('.jsonl', ''),
+        fileExists: true
       }))
+    const existingIds = new Set(sessions.map(s => s.sessionId))
+    sessions.push(...collectResetSessions(sessionsDir, existingIds))
 
     res.json({ sessions })
   } catch (err) {
@@ -127,6 +172,19 @@ app.get('/api/sessions/:agentId/:sessionId', (req, res) => {
     const filePath = expandPath(
       path.join(AGENTS_DIR, agentId, 'sessions', `${sessionId}.jsonl`)
     )
+
+    if (!fs.existsSync(filePath)) {
+      // Try reset files: {sessionId}.jsonl.reset.*
+      const sessionsDir = path.dirname(filePath)
+      const resetCandidates = safeReadDir(sessionsDir)
+        .filter(e => e.startsWith(`${sessionId}.jsonl.reset.`))
+        .sort() // ISO-ish timestamp → alphabetical = chronological
+      if (resetCandidates.length > 0) {
+        const resetPath = path.join(sessionsDir, resetCandidates[resetCandidates.length - 1])
+        return res.json({ events: parseJsonlFile(resetPath), isReset: true })
+      }
+      return res.status(404).json({ error: 'Session file not found' })
+    }
 
     const events = parseJsonlFile(filePath)
     res.json({ events })
@@ -320,7 +378,7 @@ app.get('/api/live/stream', (req, res) => {
 // Node.js 22+ has built-in WebSocket. We connect server-side so that
 // process.platform / process.arch pass OpenClaw's client schema validation.
 
-const GATEWAY_URL = 'ws://127.0.0.1:18789'
+const GATEWAY_URL = config?.gateway?.url ?? 'ws://127.0.0.1:18789'
 
 // Read gateway auth token and port from ~/.openclaw/openclaw.json
 function readGatewayConfig() {

@@ -31,6 +31,7 @@ export default function App() {
       const res = await fetch(
         `${API_BASE}/sessions/${encodeURIComponent(agentId)}/${encodeURIComponent(sessionId)}`
       )
+      if (res.status === 404) throw new Error('Session file not found on disk')
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json() as { events: OpenClawLine[] }
       setSessionEvents(data.events ?? [])

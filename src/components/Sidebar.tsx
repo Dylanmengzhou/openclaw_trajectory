@@ -66,18 +66,44 @@ function AgentNode({
             sessions.map(session => {
               const isSelected =
                 selectedAgentId === agent.agentId && selectedSessionId === session.sessionId
+              const missing = session.fileExists === false
+              const isReset = session.isReset === true
               return (
                 <button
                   key={session.sessionId}
-                  className={`w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-white/[0.04] ${
-                    isSelected ? 'bg-indigo-500/10 border-l-2 border-indigo-500' : ''
+                  disabled={missing}
+                  className={`w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors ${
+                    missing
+                      ? 'opacity-35 cursor-not-allowed'
+                      : `hover:bg-white/[0.04] ${isSelected
+                          ? isReset
+                            ? 'bg-amber-500/10 border-l-2 border-amber-500'
+                            : 'bg-indigo-500/10 border-l-2 border-indigo-500'
+                          : ''}`
                   }`}
-                  onClick={() => onSelectSession(agent.agentId, session.sessionId)}
+                  onClick={() => !missing && onSelectSession(agent.agentId, session.sessionId)}
+                  title={
+                    missing
+                      ? 'Session file not found on disk'
+                      : isReset
+                      ? `Archived session — reset at ${session.resetAt ?? ''}`
+                      : undefined
+                  }
                 >
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 flex-shrink-0" />
-                  <span className={`text-xs truncate font-mono ${isSelected ? 'text-indigo-300' : 'text-zinc-400'}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                    missing ? 'bg-zinc-600' : isReset ? 'bg-amber-400' : 'bg-blue-400'
+                  }`} />
+                  <span className={`text-xs truncate font-mono ${
+                    isSelected
+                      ? isReset ? 'text-amber-300' : 'text-indigo-300'
+                      : missing ? 'text-zinc-600'
+                      : isReset ? 'text-amber-600' : 'text-zinc-400'
+                  }`}>
                     {session.sessionId}
                   </span>
+                  {isReset && (
+                    <span className="ml-auto text-[10px] text-amber-700 flex-shrink-0">archived</span>
+                  )}
                 </button>
               )
             })
