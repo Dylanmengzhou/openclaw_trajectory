@@ -4,6 +4,7 @@ import { useSessions } from './hooks/useSessions'
 import { Sidebar } from './components/Sidebar'
 import { SessionViewer } from './components/SessionViewer'
 import { LiveMonitor } from './components/LiveMonitor'
+import { ResizeDivider } from './components/ResizeDivider'
 
 const API_BASE = '/api'
 
@@ -16,6 +17,25 @@ export default function App() {
   const [sessionEvents, setSessionEvents] = useState<OpenClawLine[]>([])
   const [loadingSession, setLoadingSession] = useState(false)
   const [sessionError, setSessionError] = useState<string | null>(null)
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    const saved = (localStorage.getItem('oc-theme') as 'dark' | 'light') ?? 'dark'
+    document.documentElement.setAttribute('data-theme', saved)
+    return saved
+  })
+  const [sidebarWidth, setSidebarWidth] = useState(320)
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+    localStorage.setItem('oc-theme', theme)
+  }, [theme])
+
+  const handleSidebarResize = useCallback((delta: number) => {
+    setSidebarWidth(w => Math.max(160, Math.min(400, w + delta)))
+  }, [])
+
+  const toggleTheme = useCallback(() => {
+    setTheme(t => (t === 'dark' ? 'light' : 'dark'))
+  }, [])
 
   useEffect(() => { fetchAgents() }, [fetchAgents])
 
@@ -54,13 +74,11 @@ export default function App() {
 
   const handleRefresh = useCallback(() => {
     fetchAgents()
-    // Re-fetch sessions for every agent that has already been loaded
     for (const agentId of Object.keys(sessions)) {
       fetchSessions(agentId)
     }
   }, [fetchAgents, fetchSessions, sessions])
 
-  // Auto-poll sessions every 10s for all loaded agents
   useEffect(() => {
     const id = setInterval(() => {
       for (const agentId of Object.keys(sessions)) {
@@ -70,7 +88,6 @@ export default function App() {
     return () => clearInterval(id)
   }, [sessions, fetchSessions])
 
-  // Auto-expand first agent
   useEffect(() => {
     if (agents.length > 0 && !selectedAgentId) {
       const firstAgent = agents[0].agentId
@@ -132,21 +149,47 @@ export default function App() {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-[#0a0a0a] text-zinc-100 overflow-hidden">
-      <header className="flex items-center justify-between px-4 py-2 bg-[#0d0d0d] border-b border-[#242424] flex-shrink-0">
-        <span className="text-xs font-semibold text-zinc-500 tracking-widest uppercase">
+    <div
+      className="flex flex-col h-screen overflow-hidden"
+      style={{ background: 'var(--bg-app)', color: 'var(--text-base)' }}
+      data-theme={theme}
+    >
+      <header
+        className="flex items-center justify-between px-4 py-2 border-b flex-shrink-0"
+        style={{ background: 'var(--bg-header)', borderColor: 'var(--border)' }}
+      >
+        <span className="text-md font-semibold text-red-600 tracking-widest uppercase">
           OpenClaw Trajectory
         </span>
-        <button
-          className="text-xs text-zinc-500 hover:text-zinc-300 border border-zinc-700 rounded px-2 py-1 transition-colors"
-          onClick={handleRefresh}
-        >
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={toggleTheme}
+            className="text-xs text-zinc-500 hover:text-zinc-300 rounded px-2 py-1 transition-colors border"
+            style={{ borderColor: 'var(--border-faint)' }}
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            {theme === 'dark' ? (
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m12.728 0l-.707-.707M6.343 6.343l-.707-.707M12 8a4 4 0 100 8 4 4 0 000-8z" />
+              </svg>
+            ) : (
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+              </svg>
+            )}
+          </button>
+          <button
+            className="text-xs text-zinc-500 hover:text-zinc-300 rounded px-2 py-1 transition-colors border"
+            style={{ borderColor: 'var(--border-faint)' }}
+            onClick={handleRefresh}
+          >
+            Refresh
+          </button>
+        </div>
       </header>
 
       <div className="flex flex-1 overflow-hidden">
-        <div className="w-56 flex-shrink-0 overflow-hidden">
+        <div style={{ width: sidebarWidth, flexShrink: 0 }} className="overflow-hidden">
           <Sidebar
             agents={agents}
             sessions={sessions}
@@ -160,6 +203,7 @@ export default function App() {
             onRefresh={handleRefresh}
           />
         </div>
+        <ResizeDivider direction="horizontal" onResize={handleSidebarResize} />
         <div className="flex-1 overflow-hidden">
           {renderMain()}
         </div>

@@ -166,9 +166,15 @@ export function ChatPanel({ checkedRows }: ChatPanelProps) {
     : 'Ask about these logs…'
 
   return (
-    <div className="flex flex-col h-full bg-[#0e0e0e]">
+    <div
+      className="flex flex-col h-full"
+      style={{ background: 'var(--bg-panel)' }}
+    >
       {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-[#242424] bg-[#141414] flex-shrink-0">
+      <div
+        className="flex items-center gap-2 px-3 py-2 border-b flex-shrink-0"
+        style={{ background: 'var(--bg-surface)', borderColor: 'var(--border)' }}
+      >
         <span className="text-xs font-semibold text-zinc-400">Chat</span>
         {checkedRows.length > 0 && (
           <span className="text-[10px] text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 rounded px-1.5 py-0.5">
@@ -256,9 +262,16 @@ export function ChatPanel({ checkedRows }: ChatPanelProps) {
       </div>
 
       {/* Input */}
-      <div className="flex items-center gap-2 px-3 py-2 border-t border-[#242424] bg-[#141414] flex-shrink-0">
+      <div
+        className="flex items-center gap-2 px-3 py-2 border-t flex-shrink-0"
+        style={{ background: 'var(--bg-surface)', borderColor: 'var(--border)' }}
+      >
         <input
-          className="flex-1 text-xs bg-[#1a1a1a] border border-[#333] rounded px-2.5 py-1.5 text-zinc-200 placeholder-zinc-600 outline-none focus:border-indigo-500/50 transition-colors"
+          className="flex-1 text-xs rounded px-2.5 py-1.5 text-zinc-200 placeholder-zinc-600 outline-none transition-colors border"
+          style={{
+            background: 'var(--bg-input)',
+            borderColor: 'var(--border-input)',
+          }}
           placeholder={placeholder}
           value={input}
           onChange={e => setInput(e.target.value)}

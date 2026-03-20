@@ -10,8 +10,8 @@ export const EVENT_TYPE_META: Record<EventType, { color: string; bg: string }> =
   THINK:   { color: '#94a3b8', bg: 'rgba(148,163,184,0.10)' },
   USER:    { color: '#60a5fa', bg: 'rgba(96,165,250,0.12)' },
   CONTEXT: { color: '#64748b', bg: 'rgba(100,116,139,0.10)' },
-  RESULT:  { color: '#6ee7b7', bg: 'rgba(110,231,183,0.10)' },
-  READ:    { color: '#6ee7b7', bg: 'rgba(110,231,183,0.10)' },
+  RESULT:  { color: 'var(--color-result)', bg: 'var(--bg-result)' },
+  READ:    { color: 'var(--color-read)', bg: 'var(--bg-read)' },
   WRITE:   { color: '#10b981', bg: 'rgba(16,185,129,0.12)' },
   EXEC:    { color: '#f59e0b', bg: 'rgba(245,158,11,0.12)' },
   BROWSER: { color: '#ec4899', bg: 'rgba(236,72,153,0.12)' },
@@ -75,4 +75,10 @@ export function truncate(str: string, maxLen: number): string {
 
 export function classNames(...classes: (string | undefined | null | false)[]): string {
   return classes.filter(Boolean).join(' ')
+}
+
+/** Append a hex alpha suffix only for plain hex colors; CSS variables can't use this trick. */
+export function withAlpha(color: string, alpha: string): string {
+  if (color.startsWith('var(')) return color
+  return color + alpha
 }

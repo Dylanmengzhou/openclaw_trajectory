@@ -147,7 +147,7 @@ export function LiveMonitor({ onClear }: LiveMonitorProps) {
   const header = (
     <>
       {/* Control bar */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-[#242424] bg-[#141414] flex-shrink-0">
+      <div className="flex items-center gap-2 px-3 py-2 border-b flex-shrink-0" style={{ background: 'var(--bg-surface)', borderColor: 'var(--border)' }}>
         {statusDot}
         <span className="text-xs text-zinc-500 font-mono truncate">
           {sessionInfo
@@ -162,7 +162,7 @@ export function LiveMonitor({ onClear }: LiveMonitorProps) {
             className="text-xs px-2 py-1 rounded border transition-colors"
             style={enabled
               ? { color: '#4ade80', borderColor: '#166534', background: 'rgba(22,101,52,0.2)' }
-              : { color: '#71717a', borderColor: '#27272a', background: 'transparent' }}
+              : { color: 'var(--text-muted)', borderColor: 'var(--border-faint)', background: 'transparent' }}
           >
             {enabled ? 'Stop' : 'Start'}
           </button>
@@ -176,7 +176,7 @@ export function LiveMonitor({ onClear }: LiveMonitorProps) {
             className="text-xs px-2 py-1 rounded border transition-colors"
             style={chatOpen
               ? { color: '#818cf8', borderColor: '#4f46e5', background: 'rgba(79,70,229,0.15)' }
-              : { color: '#52525b', borderColor: '#27272a', background: 'transparent' }}
+              : { color: 'var(--text-muted)', borderColor: 'var(--border-faint)', background: 'transparent' }}
           >
             Chat{checkedIds.size > 0 ? ` (${checkedIds.size})` : ''}
           </button>
@@ -185,7 +185,7 @@ export function LiveMonitor({ onClear }: LiveMonitorProps) {
 
       {/* Stats */}
       {rows.length > 0 && (
-        <div className="flex items-center gap-3 px-3 py-1.5 border-b border-[#1e1e1e] text-[11px] text-zinc-600 flex-shrink-0 flex-wrap">
+        <div className="flex items-center gap-3 px-3 py-1.5 border-b text-[11px] text-zinc-600 flex-shrink-0 flex-wrap" style={{ borderColor: 'var(--border-subtle)' }}>
           <span>in <span className="text-zinc-400 font-mono">{stats.totalIn.toLocaleString()}</span></span>
           <span>out <span className="text-zinc-400 font-mono">{stats.totalOut.toLocaleString()}</span></span>
           {stats.totalCost > 0 && (
@@ -236,7 +236,7 @@ export function LiveMonitor({ onClear }: LiveMonitorProps) {
       </div>
 
       {/* Bottom: detail panel, always visible */}
-      <div className="h-52 flex-shrink-0 border-t border-[#242424] bg-[#0e0e0e] overflow-hidden">
+      <div className="h-52 flex-shrink-0 border-t overflow-hidden" style={{ borderColor: 'var(--border)', background: 'var(--bg-panel)' }}>
         <DetailPanel row={selectedRow} />
       </div>
     </div>

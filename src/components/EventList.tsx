@@ -3,7 +3,8 @@
  * Right panel and detail panel are managed by the parent.
  */
 import { useState } from 'react'
-import { formatTimestamp, toolToType, EVENT_TYPE_META } from '../lib/utils'
+import { formatTimestamp, toolToType, EVENT_TYPE_META, withAlpha } from '../lib/utils'
+import { ResizeDivider } from './ResizeDivider'
 import type { EventType } from '../lib/utils'
 import type { OpenClawLine } from '../types'
 
@@ -146,8 +147,8 @@ export function FilterChip({
       style={active && meta
         ? { color: meta.color, borderColor: meta.color, background: meta.bg }
         : active
-        ? { color: '#e4e4e7', borderColor: '#52525b', background: 'rgba(82,82,91,0.2)' }
-        : { color: '#52525b', borderColor: '#27272a', background: 'transparent' }}
+        ? { color: 'var(--text-base)', borderColor: 'var(--text-muted)', background: 'rgba(82,82,91,0.15)' }
+        : { color: 'var(--text-muted)', borderColor: 'var(--border-faint)', background: 'transparent' }}
     >
       {type}
       <span className="opacity-70">{count}</span>
@@ -178,7 +179,7 @@ function RowLine({
       <TypeBadge type={row.type} />
       <span
         className="flex-1 text-xs leading-snug break-all min-w-0 truncate"
-        style={{ color: row.isError ? '#f87171' : meta.color + 'cc' }}
+        style={{ color: row.isError ? '#f87171' : withAlpha(meta.color, 'cc') }}
       >
         {row.summary}
       </span>
@@ -196,8 +197,11 @@ export function DetailPanel({ row }: { row: EventRow | null }) {
   }
   const meta = EVENT_TYPE_META[row.type]
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-[#242424] bg-[#141414] flex-shrink-0">
+    <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--bg-panel)' }}>
+      <div
+        className="flex items-center gap-2 px-3 py-2 border-b flex-shrink-0"
+        style={{ background: 'var(--bg-surface)', borderColor: 'var(--border)' }}
+      >
         <TypeBadge type={row.type} />
         <span className="text-xs font-semibold truncate" style={{ color: meta.color }}>
           {row.detail.label}
@@ -214,7 +218,7 @@ export function DetailPanel({ row }: { row: EventRow | null }) {
             </div>
             <pre
               className="text-xs leading-relaxed whitespace-pre-wrap break-all font-mono"
-              style={{ color: meta.color + 'dd' }}
+              style={{ color: withAlpha(meta.color, 'dd') }}
             >
               {s.content}
             </pre>
@@ -237,12 +241,14 @@ interface EventListProps {
   onRowSelect?: (row: EventRow | null) => void
   /** Optional panel rendered to the right of the list (e.g. ChatPanel) */
   rightPanel?: React.ReactNode
+  rightPanelWidth?: number
+  onRightPanelResize?: (delta: number) => void
 }
 
 export function EventList({
   rows, header, footer, bottomRef,
   checkedIds, onCheckedChange,
-  onRowSelect, rightPanel
+  onRowSelect, rightPanel, rightPanelWidth, onRightPanelResize
 }: EventListProps) {
   const [activeType, setActiveType] = useState<EventType | 'ALL'>('ALL')
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null)
@@ -271,11 +277,17 @@ export function EventList({
   return (
     <div className="flex h-full overflow-hidden">
       {/* Event list */}
-      <div className="flex flex-col flex-1 overflow-hidden border-r border-[#242424]">
+      <div
+        className="flex flex-col flex-1 overflow-hidden border-r"
+        style={{ borderRightColor: 'var(--border)' }}
+      >
         {header}
 
         {totalEvents > 0 && (
-          <div className="flex items-center gap-1.5 px-3 py-2 border-b border-[#1e1e1e] overflow-x-auto flex-shrink-0 scrollbar-none">
+          <div
+            className="flex items-center gap-1.5 px-3 py-2 border-b overflow-x-auto flex-shrink-0 scrollbar-none"
+            style={{ borderColor: 'var(--border-subtle)' }}
+          >
             <FilterChip type="ALL" count={totalEvents} active={activeType === 'ALL'} onClick={() => setActiveType('ALL')} />
             {activeTypes.map(t => (
               <FilterChip
@@ -291,7 +303,8 @@ export function EventList({
                 )}
                 <button
                   onClick={() => onCheckedChange(new Set(visibleRows.map(r => r.id)))}
-                  className="text-[10px] text-zinc-600 hover:text-zinc-400 border border-[#27272a] rounded px-1.5 py-0.5 transition-colors"
+                  className="text-[10px] text-zinc-600 hover:text-zinc-400 rounded px-1.5 py-0.5 transition-colors border"
+                  style={{ borderColor: 'var(--border-faint)' }}
                 >
                   All
                 </button>
@@ -331,9 +344,15 @@ export function EventList({
 
       {/* Right panel (e.g. ChatPanel) */}
       {rightPanel && (
-        <div className="w-80 flex-shrink-0 bg-[#0e0e0e]">
-          {rightPanel}
-        </div>
+        <>
+          <ResizeDivider direction="horizontal" onResize={onRightPanelResize ?? (() => {})} />
+          <div
+            style={{ width: rightPanelWidth ?? 320, flexShrink: 0, background: 'var(--bg-panel)' }}
+            className="overflow-hidden"
+          >
+            {rightPanel}
+          </div>
+        </>
       )}
     </div>
   )
