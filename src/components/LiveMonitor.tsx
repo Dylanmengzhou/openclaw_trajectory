@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { formatDuration, formatCost } from '../lib/utils'
 import { EventList, buildRows } from './EventList'
+import { ChatPanel } from './ChatPanel'
+import type { EventRow } from './EventList'
 import type { OpenClawLine } from '../types'
 
 interface LiveMonitorProps {
@@ -80,10 +82,13 @@ function useStats(events: OpenClawLine[]) {
 export function LiveMonitor({ onClear }: LiveMonitorProps) {
   const { events, sessionInfo, status, connect, disconnect } = useLiveStream()
   const [enabled, setEnabled] = useState(false)
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set())
+  const [chatOpen, setChatOpen] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null) as React.RefObject<HTMLDivElement>
 
   const rows = buildRows(events)
   const stats = useStats(events)
+  const checkedRows: EventRow[] = rows.filter(r => checkedIds.has(r.id))
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -135,6 +140,15 @@ export function LiveMonitor({ onClear }: LiveMonitorProps) {
               Clear
             </button>
           )}
+          <button
+            onClick={() => setChatOpen(o => !o)}
+            className="text-xs px-2 py-1 rounded border transition-colors"
+            style={chatOpen
+              ? { color: '#818cf8', borderColor: '#4f46e5', background: 'rgba(79,70,229,0.15)' }
+              : { color: '#52525b', borderColor: '#27272a', background: 'transparent' }}
+          >
+            Chat{checkedIds.size > 0 ? ` (${checkedIds.size})` : ''}
+          </button>
         </div>
       </div>
 
@@ -175,11 +189,22 @@ export function LiveMonitor({ onClear }: LiveMonitorProps) {
   )
 
   return (
-    <EventList
-      rows={rows}
-      header={header}
-      footer={emptyState}
-      bottomRef={bottomRef}
-    />
+    <div className="flex flex-col h-full overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-hidden">
+        <EventList
+          rows={rows}
+          header={header}
+          footer={emptyState}
+          bottomRef={bottomRef}
+          checkedIds={checkedIds}
+          onCheckedChange={setCheckedIds}
+        />
+      </div>
+      {chatOpen && (
+        <div className="h-72 flex-shrink-0 overflow-hidden">
+          <ChatPanel checkedRows={checkedRows} />
+        </div>
+      )}
+    </div>
   )
 }

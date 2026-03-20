@@ -155,8 +155,8 @@ export function FilterChip({
 }
 
 function RowLine({
-  row, selected, onClick
-}: { row: EventRow; selected: boolean; onClick: () => void }) {
+  row, selected, checked, onCheck, onClick
+}: { row: EventRow; selected: boolean; checked: boolean; onCheck: (id: string, v: boolean) => void; onClick: () => void }) {
   const meta = EVENT_TYPE_META[row.type]
   return (
     <div
@@ -164,6 +164,13 @@ function RowLine({
       className="flex items-start gap-2 py-1.5 border-b border-white/[0.03] last:border-0 cursor-pointer rounded px-1 transition-colors"
       style={selected ? { background: 'rgba(99,102,241,0.12)' } : undefined}
     >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={e => { e.stopPropagation(); onCheck(row.id, e.target.checked) }}
+        onClick={e => e.stopPropagation()}
+        className="mt-0.5 flex-shrink-0 accent-indigo-500 cursor-pointer"
+      />
       <span className="text-zinc-700 font-mono text-[10px] flex-shrink-0 pt-px w-14">
         {formatTimestamp(row.ts)}
       </span>
@@ -224,9 +231,11 @@ interface EventListProps {
   header?: React.ReactNode        // slot above filter chips
   footer?: React.ReactNode        // slot for empty-state override
   bottomRef?: React.RefObject<HTMLDivElement>
+  checkedIds?: Set<string>
+  onCheckedChange?: (ids: Set<string>) => void
 }
 
-export function EventList({ rows, header, footer, bottomRef }: EventListProps) {
+export function EventList({ rows, header, footer, bottomRef, checkedIds, onCheckedChange }: EventListProps) {
   const [activeType, setActiveType] = useState<EventType | 'ALL'>('ALL')
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null)
 
@@ -236,6 +245,23 @@ export function EventList({ rows, header, footer, bottomRef }: EventListProps) {
   const activeTypes = (Object.keys(typeCounts) as EventType[]).filter(t => (typeCounts[t] ?? 0) > 0)
   const visibleRows = activeType === 'ALL' ? rows : rows.filter(r => r.type === activeType)
   const selectedRow = rows.find(r => r.id === selectedRowId) ?? null
+
+  const handleCheck = (id: string, v: boolean) => {
+    if (!onCheckedChange) return
+    const next = new Set(checkedIds ?? [])
+    if (v) next.add(id); else next.delete(id)
+    onCheckedChange(next)
+  }
+
+  const handleSelectAll = () => {
+    onCheckedChange?.(new Set(visibleRows.map(r => r.id)))
+  }
+
+  const handleClearChecked = () => {
+    onCheckedChange?.(new Set())
+  }
+
+  const checkedCount = checkedIds?.size ?? 0
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -253,6 +279,27 @@ export function EventList({ rows, header, footer, bottomRef }: EventListProps) {
                 onClick={() => setActiveType(activeType === t ? 'ALL' : t)}
               />
             ))}
+            {onCheckedChange && (
+              <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+                {checkedCount > 0 && (
+                  <span className="text-[10px] text-indigo-400">{checkedCount} selected</span>
+                )}
+                <button
+                  onClick={handleSelectAll}
+                  className="text-[10px] text-zinc-600 hover:text-zinc-400 border border-[#27272a] rounded px-1.5 py-0.5 transition-colors"
+                >
+                  All
+                </button>
+                {checkedCount > 0 && (
+                  <button
+                    onClick={handleClearChecked}
+                    className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -267,6 +314,8 @@ export function EventList({ rows, header, footer, bottomRef }: EventListProps) {
                 key={row.id}
                 row={row}
                 selected={selectedRowId === row.id}
+                checked={checkedIds?.has(row.id) ?? false}
+                onCheck={handleCheck}
                 onClick={() => setSelectedRowId(selectedRowId === row.id ? null : row.id)}
               />
             ))}

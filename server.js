@@ -537,6 +537,90 @@ app.get('/api/gateway/stream', (req, res) => {
   })
 })
 
+// ─── Chat endpoint (proxy to configured LLM API) ─────────────────────────────
+app.post('/api/chat', async (req, res) => {
+  const chatCfg = config?.chat ?? {}
+  const chatUrl = chatCfg.url || 'https://aigc.sankuai.com/v1/openai/native/chat/completions'
+  const chatToken = chatCfg.token || process.env.CHAT_API_TOKEN || ''
+  const chatModel = chatCfg.model || 'aws.claude-opus-4.6'
+
+  if (!chatToken) {
+    return res.status(500).json({ error: 'chat.token not set in config.json and CHAT_API_TOKEN env not set' })
+  }
+
+  const { messages, systemPrompt } = req.body
+  if (!Array.isArray(messages)) {
+    return res.status(400).json({ error: 'messages must be an array' })
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+  res.flushHeaders()
+
+  // Build messages array: prepend system as a system-role message if provided
+  const fullMessages = systemPrompt
+    ? [{ role: 'system', content: systemPrompt }, ...messages]
+    : messages
+
+  try {
+    const response = await fetch(chatUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': chatToken,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: chatModel,
+        max_tokens: 2048,
+        stream: true,
+        messages: fullMessages
+      })
+    })
+
+    if (!response.ok) {
+      const err = await response.text()
+      res.write(`data: ${JSON.stringify({ type: 'error', message: err })}\n\n`)
+      res.end()
+      return
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      const chunk = decoder.decode(value, { stream: true })
+      for (const line of chunk.split('\n')) {
+        if (!line.startsWith('data: ')) continue
+        const data = line.slice(6).trim()
+        if (data === '[DONE]') {
+          res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`)
+          continue
+        }
+        try {
+          const event = JSON.parse(data)
+          // OpenAI-compatible streaming format
+          const delta = event.choices?.[0]?.delta
+          if (delta?.content) {
+            res.write(`data: ${JSON.stringify({ type: 'text', text: delta.content })}\n\n`)
+          }
+          // Also handle thinking blocks if present
+          if (delta?.thinking) {
+            res.write(`data: ${JSON.stringify({ type: 'text', text: delta.thinking })}\n\n`)
+          }
+        } catch { /* skip malformed */ }
+      }
+    }
+    res.end()
+  } catch (err) {
+    res.write(`data: ${JSON.stringify({ type: 'error', message: err.message })}\n\n`)
+    res.end()
+  }
+})
+
 // ─── Start ────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`OpenClaw Trajectory API server running on http://localhost:${PORT}`)

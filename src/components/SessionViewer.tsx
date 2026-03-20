@@ -1,6 +1,8 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { formatDuration, formatCost } from '../lib/utils'
 import { EventList, buildRows } from './EventList'
+import { ChatPanel } from './ChatPanel'
+import type { EventRow } from './EventList'
 import type { OpenClawLine } from '../types'
 
 interface SessionViewerProps {
@@ -31,6 +33,10 @@ function useStats(events: OpenClawLine[]) {
 export function SessionViewer({ events, agentId, sessionId }: SessionViewerProps) {
   const rows = useMemo(() => buildRows(events), [events])
   const stats = useStats(events)
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set())
+  const [chatOpen, setChatOpen] = useState(false)
+
+  const checkedRows: EventRow[] = rows.filter(r => checkedIds.has(r.id))
 
   const header = (
     <>
@@ -39,6 +45,15 @@ export function SessionViewer({ events, agentId, sessionId }: SessionViewerProps
         <span className="text-zinc-700">/</span>
         <span className="text-xs text-zinc-600 font-mono">{sessionId.slice(0, 8)}</span>
         <span className="ml-auto text-xs text-zinc-700">{rows.length} events</span>
+        <button
+          onClick={() => setChatOpen(o => !o)}
+          className="text-xs px-2 py-1 rounded border transition-colors flex-shrink-0"
+          style={chatOpen
+            ? { color: '#818cf8', borderColor: '#4f46e5', background: 'rgba(79,70,229,0.15)' }
+            : { color: '#52525b', borderColor: '#27272a', background: 'transparent' }}
+        >
+          Chat{checkedIds.size > 0 ? ` (${checkedIds.size})` : ''}
+        </button>
       </div>
       <div className="flex items-center gap-3 px-3 py-1.5 border-b border-[#1e1e1e] text-[11px] text-zinc-600 flex-shrink-0 flex-wrap">
         <span>in <span className="text-zinc-400 font-mono">{stats.totalIn.toLocaleString()}</span></span>
@@ -53,5 +68,21 @@ export function SessionViewer({ events, agentId, sessionId }: SessionViewerProps
     </>
   )
 
-  return <EventList rows={rows} header={header} />
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-hidden">
+        <EventList
+          rows={rows}
+          header={header}
+          checkedIds={checkedIds}
+          onCheckedChange={setCheckedIds}
+        />
+      </div>
+      {chatOpen && (
+        <div className="h-72 flex-shrink-0 overflow-hidden">
+          <ChatPanel checkedRows={checkedRows} />
+        </div>
+      )}
+    </div>
+  )
 }
