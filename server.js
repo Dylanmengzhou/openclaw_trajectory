@@ -614,12 +614,9 @@ app.post("/api/chat", async (req, res) => {
   const chatModel = chatCfg.model || "aws.claude-opus-4.6";
 
   if (!chatToken) {
-    return res
-      .status(500)
-      .json({
-        error:
-          "chat.token not set in config.json and CHAT_API_TOKEN env not set",
-      });
+    return res.status(500).json({
+      error: "chat.token not set in config.json and CHAT_API_TOKEN env not set",
+    });
   }
 
   const { messages, systemPrompt } = req.body;
@@ -665,39 +662,48 @@ app.post("/api/chat", async (req, res) => {
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
+    let fullResponse = "";
+    let lineBuffer = "";
+
+    const processLine = (line) => {
+      if (!line.startsWith("data: ")) return;
+      const data = line.slice(6).trim();
+      if (data === "[DONE]") {
+        res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+        return;
+      }
+      try {
+        const event = JSON.parse(data);
+        const delta = event.choices?.[0]?.delta;
+        if (delta?.content) {
+          fullResponse += delta.content;
+          res.write(
+            `data: ${JSON.stringify({ type: "text", text: delta.content })}\n\n`,
+          );
+        }
+        // thinking blocks are NOT forwarded to frontend (they cause garbled output)
+      } catch {
+        /* skip malformed */
+      }
+    };
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      const chunk = decoder.decode(value, { stream: true });
-      for (const line of chunk.split("\n")) {
-        if (!line.startsWith("data: ")) continue;
-        const data = line.slice(6).trim();
-        if (data === "[DONE]") {
-          res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
-          continue;
-        }
-        try {
-          const event = JSON.parse(data);
-          // OpenAI-compatible streaming format
-          const delta = event.choices?.[0]?.delta;
-          if (delta?.content) {
-            res.write(
-              `data: ${JSON.stringify({ type: "text", text: delta.content })}\n\n`,
-            );
-          }
-          // Also handle thinking blocks if present
-          if (delta?.thinking) {
-            res.write(
-              `data: ${JSON.stringify({ type: "text", text: delta.thinking })}\n\n`,
-            );
-          }
-        } catch {
-          /* skip malformed */
-        }
+      // Append new chunk to buffer, then process complete lines only
+      lineBuffer += decoder.decode(value, { stream: true });
+      const lines = lineBuffer.split("\n");
+      // Last element may be an incomplete line — keep it in the buffer
+      lineBuffer = lines.pop() ?? "";
+      for (const line of lines) {
+        processLine(line);
       }
     }
+    // Process any remaining buffered content
+    if (lineBuffer) processLine(lineBuffer);
+
+    console.log("\n[chat response]\n" + fullResponse + "\n[/chat response]\n");
     res.end();
   } catch (err) {
     res.write(
